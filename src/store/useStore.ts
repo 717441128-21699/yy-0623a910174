@@ -27,13 +27,14 @@ interface StoreState {
   activities: Activity[];
   signups: ActivitySignup[];
   feedbacks: Feedback[];
-  isPresident: boolean;
 
+  get isPresident(): boolean;
   getCurrentMember: () => Member | undefined;
   getCurrentPreference: () => Preference | undefined;
   getMemberById: (id: string) => Member | undefined;
   getPreferenceByMemberId: (id: string) => Preference | undefined;
 
+  switchUser: (userId: string) => void;
   submitQuiz: (answers: { questionId: string; optionIndex: number }[]) => void;
   createActivity: (data: Omit<Activity, 'id' | 'createdBy' | 'createdAt' | 'status'>) => void;
   signupActivity: (activityId: string) => void;
@@ -46,6 +47,7 @@ interface StoreState {
   getActivitiesByStatus: (status: Activity['status']) => Activity[];
   hasSubmittedFeedback: (activityId: string, memberId: string) => boolean;
   isSignedUp: (activityId: string, memberId: string) => boolean;
+  calculateVeteranRatio: (activityId: string) => { current: number; required: number; ok: boolean };
 }
 
 const initialState = {
@@ -309,6 +311,35 @@ export const useStore = create<StoreState>((set, get) => {
       return get().signups.some(
         s => s.activityId === activityId && s.memberId === memberId
       );
+    },
+
+    switchUser: (userId) => {
+      set({ currentUserId: userId });
+      saveToStorage({ ...get(), currentUserId: userId });
+    },
+
+    calculateVeteranRatio: (activityId) => {
+      const activity = get().activities.find(a => a.id === activityId);
+      if (!activity) return { current: 0, required: 0, ok: false };
+
+      const signups = get().signups.filter(s => s.activityId === activityId);
+      const totalSignups = signups.length;
+      
+      if (totalSignups === 0) {
+        return { current: 0, required: activity.veteranRatio, ok: false };
+      }
+
+      const veteranCount = signups.filter(s => {
+        const member = get().members.find(m => m.id === s.memberId);
+        return member && member.level !== 'new';
+      }).length;
+
+      const currentRatio = veteranCount / totalSignups;
+      return {
+        current: currentRatio,
+        required: activity.veteranRatio,
+        ok: currentRatio >= activity.veteranRatio,
+      };
     },
   };
 });

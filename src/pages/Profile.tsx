@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Calendar, Activity, Award, ChevronRight, Sparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Calendar, Activity, Award, ChevronRight, Sparkles, Crown } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import GlassCard from '@/components/GlassCard';
 import TasteTag from '@/components/TasteTag';
@@ -16,10 +16,22 @@ export default function Profile() {
   const getFeedbacksByActivity = useStore(state => state.getFeedbacksByActivity);
   const hasSubmittedFeedback = useStore(state => state.hasSubmittedFeedback);
   const currentUserId = useStore(state => state.currentUserId);
+  const isPresident = useStore(state => state.isPresident);
 
   const [showQuiz, setShowQuiz] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<{ questionId: string; optionIndex: number }[]>([]);
+
+  useEffect(() => {
+    if (currentPreference && !currentPreference.hasCompletedQuiz) {
+      setShowQuiz(true);
+    }
+  }, [currentPreference, currentUserId]);
+
+  useEffect(() => {
+    setCurrentQuestion(0);
+    setAnswers([]);
+  }, [currentUserId]);
 
   const mySignups = getSignupsByMember(currentUserId);
   const endedActivities = mySignups.filter(s => s.activity.status === 'ended');

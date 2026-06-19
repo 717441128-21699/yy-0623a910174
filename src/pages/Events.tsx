@@ -5,7 +5,6 @@ import GlassCard from '@/components/GlassCard';
 import TasteTag from '@/components/TasteTag';
 import Modal from '@/components/Modal';
 import { ACTIVITY_TYPE_LABELS, ACTIVITY_TYPE_COLORS, TIER_LABELS, type ActivityType } from '@/types';
-import { calculateVeteranRatio } from '@/utils/matching';
 
 export default function Events() {
   const isPresident = useStore(state => state.isPresident);
@@ -17,6 +16,7 @@ export default function Events() {
   const isSignedUp = useStore(state => state.isSignedUp);
   const currentUserId = useStore(state => state.currentUserId);
   const getPreferenceByMemberId = useStore(state => state.getPreferenceByMemberId);
+  const calculateVeteranRatio = useStore(state => state.calculateVeteranRatio);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [expandedActivity, setExpandedActivity] = useState<string | null>(null);
@@ -85,9 +85,9 @@ export default function Events() {
     const experienceSignups = signups.filter(s => s.tier === 'experience');
     const substituteSignups = signups.filter(s => s.tier === 'substitute');
 
-    const veteranCount = signups.filter(s => s.member.level !== 'new').length;
-    const actualRatio = signups.length > 0 ? veteranCount / Math.min(signups.length, activity.totalSlots) : 0;
-    const ratioOk = actualRatio >= activity.veteranRatio;
+    const veteranRatio = calculateVeteranRatio(activity.id);
+    const actualRatio = veteranRatio.current;
+    const ratioOk = veteranRatio.ok;
 
     return (
       <GlassCard

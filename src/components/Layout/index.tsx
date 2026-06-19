@@ -1,10 +1,15 @@
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { User, Calendar, MessageSquare, Crown } from 'lucide-react';
+import { User, Calendar, MessageSquare, Crown, ChevronDown, Sparkles } from 'lucide-react';
 import { useStore } from '@/store/useStore';
+import { MEMBER_LEVEL_LABELS } from '@/types';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const currentMember = useStore(state => state.getCurrentMember());
   const isPresident = useStore(state => state.isPresident);
+  const members = useStore(state => state.members);
+  const switchUser = useStore(state => state.switchUser);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const navItems = [
     { path: '/profile', label: '成员档案', icon: User },
@@ -46,26 +51,95 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-amber-500/10">
-          <div className="flex items-center gap-3 p-3 rounded-lg bg-midnight-800/50">
-            <div className="relative">
-              <img
-                src={currentMember?.avatar}
-                alt={currentMember?.name}
-                className="w-10 h-10 rounded-full border-2 border-amber-500/50"
-              />
-              {isPresident && (
-                <Crown
-                  size={14}
-                  className="absolute -top-1 -right-1 text-amber-400"
+          <div className="relative">
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="w-full flex items-center gap-3 p-3 rounded-lg bg-midnight-800/50 hover:bg-midnight-700/50 transition-colors"
+            >
+              <div className="relative">
+                <img
+                  src={currentMember?.avatar}
+                  alt={currentMember?.name}
+                  className="w-10 h-10 rounded-full border-2 border-amber-500/50"
                 />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-medium truncate">{currentMember?.name}</p>
-              <p className="text-xs text-midnight-400">
-                {isPresident ? '社长' : '社员'}
-              </p>
-            </div>
+                {isPresident && (
+                  <Crown
+                    size={14}
+                    className="absolute -top-1 -right-1 text-amber-400"
+                  />
+                )}
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <p className="font-medium truncate">{currentMember?.name}</p>
+                <p className="text-xs text-midnight-400">
+                  {isPresident ? '社长' : '社员'} · 点击切换身份
+                </p>
+              </div>
+              <ChevronDown size={16} className="text-midnight-400" />
+            </button>
+
+            {showUserMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowUserMenu(false)}
+                />
+                <div className="absolute bottom-full left-0 right-0 mb-2 bg-midnight-800 border border-amber-500/20 rounded-xl shadow-2xl overflow-hidden z-50">
+                  <div className="p-2 border-b border-amber-500/10">
+                    <p className="text-xs text-midnight-400 px-2 flex items-center gap-1">
+                      <Sparkles size={12} />
+                      切换身份体验
+                    </p>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {members.map(member => (
+                      <button
+                        key={member.id}
+                        onClick={() => {
+                          switchUser(member.id);
+                          setShowUserMenu(false);
+                        }}
+                        className={`w-full flex items-center gap-3 p-3 hover:bg-midnight-700/50 transition-colors ${
+                          member.id === currentMember?.id
+                            ? 'bg-amber-500/10'
+                            : ''
+                        }`}
+                      >
+                        <div className="relative">
+                          <img
+                            src={member.avatar}
+                            alt={member.name}
+                            className={`w-8 h-8 rounded-full ${
+                              member.id === currentMember?.id
+                                ? 'border-2 border-amber-500'
+                                : 'border border-midnight-600'
+                            }`}
+                          />
+                          {member.role === 'president' && (
+                            <Crown
+                              size={12}
+                              className="absolute -top-1 -right-1 text-amber-400"
+                            />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0 text-left">
+                          <p className="text-sm font-medium text-midnight-100 truncate">
+                            {member.name}
+                          </p>
+                          <p className="text-xs text-midnight-400">
+                            {MEMBER_LEVEL_LABELS[member.level]}
+                            {member.role === 'president' ? ' · 社长' : ''}
+                          </p>
+                        </div>
+                        {member.id === currentMember?.id && (
+                          <div className="w-2 h-2 rounded-full bg-amber-500" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </aside>
