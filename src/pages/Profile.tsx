@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Activity, Award, ChevronRight, Sparkles, Crown, Target, TrendingUp, Clock8, Check, X, Send } from 'lucide-react';
+import { Calendar, Activity, Award, ChevronRight, Sparkles, Crown, Target, TrendingUp, Clock8, Check, X, Send, ListPlus, CheckCircle } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import GlassCard from '@/components/GlassCard';
 import TasteTag from '@/components/TasteTag';
@@ -40,7 +40,10 @@ export default function Profile() {
   }, [currentUserId]);
 
   const mySignups = getSignupsByMember(currentUserId);
+  const upcomingSignups = mySignups.filter(s => s.activity.status === 'upcoming');
   const endedActivities = mySignups.filter(s => s.activity.status === 'ended');
+  const formalUpcoming = upcomingSignups.filter(s => !s.isWaitlist);
+  const waitlistUpcoming = upcomingSignups.filter(s => s.isWaitlist);
   const activityFit = getActivityTypeFit(currentUserId);
   const myInvitations = getInvitationsByMember(currentUserId);
   const pendingInvitations = myInvitations.filter(i => i.status === 'pending');
@@ -116,74 +119,157 @@ export default function Profile() {
         )}
       </div>
 
-      {pendingInvitations.length > 0 && (
+      {(formalUpcoming.length > 0 || waitlistUpcoming.length > 0 || pendingInvitations.length > 0) && (
         <GlassCard className="p-5 border border-amber-500/30 bg-amber-500/5">
           <h3 className="font-serif text-lg font-bold text-amber-400 mb-4 flex items-center gap-2">
-            <Clock8 size={20} />
-            待确认邀请 ({pendingInvitations.length})
-            <span className="text-xs font-normal text-midnight-400 ml-2">
-              社长邀请你参加活动
-            </span>
+            <Calendar size={20} />
+            我的活动安排
           </h3>
-          <div className="space-y-3">
-            {pendingInvitations.map(inv => (
-              <div key={inv.id} className="flex items-center justify-between p-4 bg-midnight-800/60 rounded-lg border border-amber-500/20">
-                <div className="flex items-center gap-4">
-                  <img
-                    src={inv.inviter.avatar}
-                    alt={inv.inviter.name}
-                    className="w-12 h-12 rounded-full"
-                  />
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <p className="text-sm font-medium text-midnight-100">
-                        {inv.inviter.name} 邀请你参加
-                      </p>
-                      <TasteTag
-                        label={TYPE_LABELS[inv.activity.type]}
-                        size="sm"
-                        variant={
-                          inv.activity.type === 'honkaku' ? 'danger' :
-                          inv.activity.type === 'henkaku' ? 'mystic' :
-                          inv.activity.type === 'fun' ? 'gold' : 'default'
-                        }
-                      />
-                    </div>
-                    <p className="font-medium text-amber-400">{inv.activity.title}</p>
-                    <p className="text-xs text-midnight-400">
-                      {inv.activity.scriptName} · {inv.activity.date} {inv.activity.time}
-                    </p>
-                    {inv.message && (
-                      <p className="text-xs text-midnight-300 mt-1 italic">
-                        "{inv.message}"
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {!isSignedUp(inv.activity.id, currentUserId) ? (
-                    <>
-                      <button
-                        onClick={() => declineInvitation(inv.id)}
-                        className="px-4 py-2 bg-crimson-500/20 text-crimson-400 hover:bg-crimson-500/30 font-medium text-sm rounded-lg transition-colors flex items-center gap-1.5 border border-crimson-500/30"
-                      >
-                        <X size={16} />
-                        拒绝
-                      </button>
-                      <button
-                        onClick={() => acceptInvitation(inv.id)}
-                        className="px-4 py-2 bg-gradient-gold text-midnight-900 font-medium text-sm rounded-lg hover:shadow-gold-lg transition-all flex items-center gap-1.5"
-                      >
-                        <Check size={16} />
-                        接受
-                      </button>
-                    </>
-                  ) : (
-                    <TasteTag label="已报名" variant="success" size="sm" />
-                  )}
-                </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <CheckCircle size={16} className="text-mystic-400" />
+                <p className="text-sm font-bold text-mystic-300">
+                  已报名（正式位）
+                  <span className="font-normal text-midnight-400 ml-1">({formalUpcoming.length})</span>
+                </p>
               </div>
-            ))}
+              {formalUpcoming.length > 0 ? (
+                <div className="space-y-2">
+                  {formalUpcoming.map(({ activity }) => (
+                    <div key={activity.id} className="p-3 bg-mystic-500/10 rounded-lg border border-mystic-500/20">
+                      <div className="flex items-center gap-2 mb-1">
+                        <TasteTag
+                          label={TYPE_LABELS[activity.type]}
+                          size="sm"
+                          variant={
+                            activity.type === 'honkaku' ? 'danger' :
+                            activity.type === 'henkaku' ? 'mystic' :
+                            activity.type === 'fun' ? 'gold' : 'default'
+                          }
+                        />
+                        <TasteTag label="正式位" size="sm" variant="success" />
+                      </div>
+                      <p className="font-medium text-midnight-100 text-sm mb-0.5">{activity.title}</p>
+                      <p className="text-xs text-amber-400 mb-1">{activity.scriptName}</p>
+                      <p className="text-xs text-midnight-400">
+                        {activity.date} {activity.time}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-midnight-500 py-4 text-center bg-midnight-800/30 rounded-lg">
+                  暂无已报名活动
+                </p>
+              )}
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <ListPlus size={16} className="text-amber-400" />
+                <p className="text-sm font-bold text-amber-300">
+                  候补中
+                  <span className="font-normal text-midnight-400 ml-1">({waitlistUpcoming.length})</span>
+                </p>
+              </div>
+              {waitlistUpcoming.length > 0 ? (
+                <div className="space-y-2">
+                  {waitlistUpcoming.map(({ activity, waitlistPosition }) => (
+                    <div key={activity.id} className="p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                      <div className="flex items-center gap-2 mb-1">
+                        <TasteTag
+                          label={TYPE_LABELS[activity.type]}
+                          size="sm"
+                          variant={
+                            activity.type === 'honkaku' ? 'danger' :
+                            activity.type === 'henkaku' ? 'mystic' :
+                            activity.type === 'fun' ? 'gold' : 'default'
+                          }
+                        />
+                        <TasteTag label={`候补 #${waitlistPosition || '?'}`} size="sm" variant="default" />
+                      </div>
+                      <p className="font-medium text-midnight-100 text-sm mb-0.5">{activity.title}</p>
+                      <p className="text-xs text-amber-400 mb-1">{activity.scriptName}</p>
+                      <p className="text-xs text-midnight-400">
+                        {activity.date} {activity.time}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-midnight-500 py-4 text-center bg-midnight-800/30 rounded-lg">
+                  暂无候补活动
+                </p>
+              )}
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Clock8 size={16} className="text-amber-400" />
+                <p className="text-sm font-bold text-amber-300">
+                  待确认邀请
+                  <span className="font-normal text-midnight-400 ml-1">({pendingInvitations.length})</span>
+                </p>
+              </div>
+              {pendingInvitations.length > 0 ? (
+                <div className="space-y-2">
+                  {pendingInvitations.map(inv => (
+                    <div key={inv.id} className="p-3 bg-midnight-800/60 rounded-lg border border-amber-500/20">
+                      <div className="flex items-center gap-2 mb-1">
+                        <TasteTag
+                          label={TYPE_LABELS[inv.activity.type]}
+                          size="sm"
+                          variant={
+                            inv.activity.type === 'honkaku' ? 'danger' :
+                            inv.activity.type === 'henkaku' ? 'mystic' :
+                            inv.activity.type === 'fun' ? 'gold' : 'default'
+                          }
+                        />
+                        <span className="text-xs text-midnight-400">
+                          {inv.inviter.name} 邀请
+                        </span>
+                      </div>
+                      <p className="font-medium text-midnight-100 text-sm mb-0.5">{inv.activity.title}</p>
+                      <p className="text-xs text-amber-400 mb-1">{inv.activity.scriptName}</p>
+                      <p className="text-xs text-midnight-400 mb-2">
+                        {inv.activity.date} {inv.activity.time}
+                      </p>
+                      {inv.message && (
+                        <p className="text-xs text-midnight-300 italic mb-2">
+                          "{inv.message}"
+                        </p>
+                      )}
+                      {!isSignedUp(inv.activity.id, currentUserId) ? (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => declineInvitation(inv.id)}
+                            className="flex-1 px-2 py-1.5 bg-crimson-500/20 text-crimson-400 hover:bg-crimson-500/30 font-medium text-xs rounded-lg transition-colors flex items-center justify-center gap-1 border border-crimson-500/30"
+                          >
+                            <X size={12} />
+                            拒绝
+                          </button>
+                          <button
+                            onClick={() => acceptInvitation(inv.id)}
+                            className="flex-1 px-2 py-1.5 bg-gradient-gold text-midnight-900 font-medium text-xs rounded-lg hover:shadow-gold-lg transition-all flex items-center justify-center gap-1"
+                          >
+                            <Check size={12} />
+                            接受
+                          </button>
+                        </div>
+                      ) : (
+                        <TasteTag label="已报名" variant="success" size="sm" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-midnight-500 py-4 text-center bg-midnight-800/30 rounded-lg">
+                  暂无待确认邀请
+                </p>
+              )}
+            </div>
           </div>
         </GlassCard>
       )}

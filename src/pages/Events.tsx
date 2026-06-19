@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Calendar, Clock, Users, ChevronDown, ChevronUp, Crown, Zap, Coffee, AlertTriangle, CheckCircle, ListPlus, Sparkles, Star, ArrowUp, Send, X, Clock8 } from 'lucide-react';
+import { Plus, Calendar, Clock, Users, ChevronDown, ChevronUp, Crown, Zap, Coffee, AlertTriangle, CheckCircle, ListPlus, Sparkles, Star, ArrowUp, Send, X, Clock8, Undo2 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import GlassCard from '@/components/GlassCard';
 import TasteTag from '@/components/TasteTag';
@@ -23,12 +23,14 @@ export default function Events() {
   const calculateVeteranRatio = useStore(state => state.calculateVeteranRatio);
   const getRecommendationsForActivity = useStore(state => state.getRecommendationsForActivity);
   const hasPendingInvitation = useStore(state => state.hasPendingInvitation);
+  const revokeInvitation = useStore(state => state.revokeInvitation);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [expandedActivity, setExpandedActivity] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<ActivityType | 'all'>('all');
   const [inviteMessage, setInviteMessage] = useState('');
   const [showInviteModal, setShowInviteModal] = useState<string | null>(null);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
 
   const [newActivity, setNewActivity] = useState({
     title: '',
@@ -60,11 +62,15 @@ export default function Events() {
   const handleCreateActivity = () => {
     if (!newActivity.title || !newActivity.scriptName || !newActivity.date) return;
 
-    createActivity({
-      ...newActivity,
-    });
+    createActivity(
+      {
+        ...newActivity,
+      },
+      selectedMemberIds.length > 0 ? selectedMemberIds : undefined
+    );
 
     setShowCreateModal(false);
+    setSelectedMemberIds([]);
     setNewActivity({
       title: '',
       scriptName: '',
@@ -75,6 +81,20 @@ export default function Events() {
       veteranRatio: 0.5,
       description: '',
     });
+  };
+
+  const handleRevokeInvitation = (invitationId: string) => {
+    if (window.confirm('确定撤回这条邀请吗？')) {
+      revokeInvitation(invitationId);
+    }
+  };
+
+  const toggleMemberSelection = (memberId: string) => {
+    setSelectedMemberIds(prev =>
+      prev.includes(memberId)
+        ? prev.filter(id => id !== memberId)
+        : [...prev, memberId]
+    );
   };
 
   const handleSignup = (activityId: string) => {
@@ -113,6 +133,8 @@ export default function Events() {
     const lowMatchSignups = formalSignups.filter(s => s.isLowMatch);
 
     const pendingInvitations = invitations.filter(i => i.status === 'pending');
+    const acceptedInvitations = invitations.filter(i => i.status === 'accepted');
+    const declinedInvitations = invitations.filter(i => i.status === 'declined');
 
     const veteranRatio = calculateVeteranRatio(activity.id);
     const ratioOk = veteranRatio.ok;
@@ -387,27 +409,78 @@ export default function Events() {
               </>
             )}
 
-            {pendingInvitations.length > 0 && (
+            {(pendingInvitations.length > 0 || acceptedInvitations.length > 0 || declinedInvitations.length > 0) && (
               <div className="mb-4">
-                <h5 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-2">
+                <h5 className="text-sm font-bold text-amber-400 mb-3 flex items-center gap-2">
                   <Clock8 size={16} />
-                  待确认邀请 ({pendingInvitations.length})
+                  邀请管理
                 </h5>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {pendingInvitations.map(inv => (
-                    <div key={inv.id} className="flex items-center gap-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
-                      <img src={inv.member.avatar} alt={inv.member.name} className="w-9 h-9 rounded-full" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-midnight-100">{inv.member.name}</p>
-                        {inv.message && (
-                          <p className="text-xs text-midnight-400 truncate">"{inv.message}"</p>
-                        )}
-                        <p className="text-xs text-midnight-500">{inv.createdAt}</p>
-                      </div>
-                      <TasteTag label={INVITATION_STATUS_LABELS[inv.status]} size="sm" variant="default" />
+
+                {pendingInvitations.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-medium text-amber-300 mb-2">待确认 ({pendingInvitations.length})</p>
+                    <div className="space-y-2">
+                      {pendingInvitations.map(inv => (
+                        <div key={inv.id} className="flex items-center gap-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                          <img src={inv.member.avatar} alt={inv.member.name} className="w-9 h-9 rounded-full" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-midnight-100">{inv.member.name}</p>
+                            {inv.message && (
+                              <p className="text-xs text-midnight-400 truncate">"{inv.message}"</p>
+                            )}
+                            <p className="text-xs text-midnight-500">{inv.createdAt}</p>
+                          </div>
+                          {isPresident && (
+                            <button
+                              onClick={() => handleRevokeInvitation(inv.id)}
+                              className="px-3 py-1.5 bg-crimson-500/20 text-crimson-400 hover:bg-crimson-500/30 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 border border-crimson-500/30"
+                              title="撤回邀请"
+                            >
+                              <Undo2 size={12} />
+                              撤回
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
+
+                {acceptedInvitations.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-medium text-mystic-300 mb-2">已接受 ({acceptedInvitations.length})</p>
+                    <div className="space-y-2">
+                      {acceptedInvitations.map(inv => (
+                        <div key={inv.id} className="flex items-center gap-3 p-3 bg-mystic-500/10 rounded-lg border border-mystic-500/20">
+                          <img src={inv.member.avatar} alt={inv.member.name} className="w-9 h-9 rounded-full" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-midnight-100">{inv.member.name}</p>
+                            <p className="text-xs text-midnight-500">接受于 {inv.respondedAt}</p>
+                          </div>
+                          <TasteTag label="已接受" size="sm" variant="success" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {declinedInvitations.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-crimson-300 mb-2">已拒绝 ({declinedInvitations.length})</p>
+                    <div className="space-y-2">
+                      {declinedInvitations.map(inv => (
+                        <div key={inv.id} className="flex items-center gap-3 p-3 bg-crimson-500/5 rounded-lg border border-crimson-500/20 opacity-75">
+                          <img src={inv.member.avatar} alt={inv.member.name} className="w-9 h-9 rounded-full opacity-70" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-midnight-200">{inv.member.name}</p>
+                            <p className="text-xs text-midnight-500">拒绝于 {inv.respondedAt}</p>
+                          </div>
+                          <TasteTag label="已拒绝" size="sm" variant="danger" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -545,7 +618,7 @@ export default function Events() {
                   <h5 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-2">
                     <ListPlus size={16} />
                     候补名单 ({waitlistSignups.length})
-                    <span className="text-xs font-normal text-midnight-500">有空位时按匹配度自动递补</span>
+                    <span className="text-xs font-normal text-midnight-500">按加入先后固定排序，有空位时从第一位递补</span>
                   </h5>
                   <div className="space-y-2">
                     {waitlistSignups.map((signup, idx) => (
@@ -835,31 +908,48 @@ export default function Events() {
 
           {isPresident && (
             <div className="border border-amber-500/20 rounded-xl p-4 bg-amber-500/5">
-              <h5 className="font-serif text-base font-bold text-amber-400 mb-3 flex items-center gap-2">
+              <h5 className="font-serif text-base font-bold text-amber-400 mb-2 flex items-center gap-2">
                 <Sparkles size={16} />
-                智能推荐报名
+                智能推荐 & 批量邀请
                 <span className="text-xs font-normal text-midnight-400 ml-2">
-                  需要 {recommendations.neededVeterans} 位老玩家 + {recommendations.neededNewbies} 位新社员
+                  勾选后发布活动将统一发送邀请，已选 {selectedMemberIds.length} 人
                 </span>
               </h5>
+              <p className="text-xs text-midnight-400 mb-3">
+                需要 {recommendations.neededVeterans} 位老玩家 + {recommendations.neededNewbies} 位新社员
+              </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm font-medium text-midnight-300 mb-2">推荐老玩家</p>
                   {recommendations.recommendedVeterans.length > 0 ? (
                     <div className="space-y-2">
-                      {recommendations.recommendedVeterans.slice(0, 3).map(m => (
-                        <div key={m.id} className="flex items-center justify-between p-2 bg-midnight-800/60 rounded-lg">
-                          <div className="flex items-center gap-2">
-                            <img src={m.avatar} alt={m.name} className="w-7 h-7 rounded-full" />
-                            <div>
-                              <p className="text-sm text-midnight-100">{m.name}</p>
-                              <p className="text-xs text-midnight-400">{m.reasons.join(' · ')}</p>
+                      {recommendations.recommendedVeterans.slice(0, 3).map(m => {
+                        const checked = selectedMemberIds.includes(m.id);
+                        return (
+                          <label
+                            key={m.id}
+                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
+                              checked ? 'bg-amber-500/20 border border-amber-500/40' : 'bg-midnight-800/60 hover:bg-midnight-700/60'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleMemberSelection(m.id)}
+                                className="w-4 h-4 accent-amber-500 rounded"
+                              />
+                              <img src={m.avatar} alt={m.name} className="w-7 h-7 rounded-full" />
+                              <div>
+                                <p className="text-sm text-midnight-100">{m.name}</p>
+                                <p className="text-xs text-midnight-400">{m.reasons.join(' · ')}</p>
+                              </div>
                             </div>
-                          </div>
-                          <span className="text-sm font-bold text-crimson-400">{m.matchScore}%</span>
-                        </div>
-                      ))}
+                            <span className="text-sm font-bold text-crimson-400">{m.matchScore}%</span>
+                          </label>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-xs text-midnight-500">暂无合适的老玩家推荐</p>
@@ -869,18 +959,32 @@ export default function Events() {
                   <p className="text-sm font-medium text-midnight-300 mb-2">推荐新社员</p>
                   {recommendations.recommendedNewbies.length > 0 ? (
                     <div className="space-y-2">
-                      {recommendations.recommendedNewbies.slice(0, 3).map(m => (
-                        <div key={m.id} className="flex items-center justify-between p-2 bg-midnight-800/60 rounded-lg">
-                          <div className="flex items-center gap-2">
-                            <img src={m.avatar} alt={m.name} className="w-7 h-7 rounded-full" />
-                            <div>
-                              <p className="text-sm text-midnight-100">{m.name}</p>
-                              <p className="text-xs text-midnight-400">{m.reasons.join(' · ')}</p>
+                      {recommendations.recommendedNewbies.slice(0, 3).map(m => {
+                        const checked = selectedMemberIds.includes(m.id);
+                        return (
+                          <label
+                            key={m.id}
+                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
+                              checked ? 'bg-amber-500/20 border border-amber-500/40' : 'bg-midnight-800/60 hover:bg-midnight-700/60'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleMemberSelection(m.id)}
+                                className="w-4 h-4 accent-amber-500 rounded"
+                              />
+                              <img src={m.avatar} alt={m.name} className="w-7 h-7 rounded-full" />
+                              <div>
+                                <p className="text-sm text-midnight-100">{m.name}</p>
+                                <p className="text-xs text-midnight-400">{m.reasons.join(' · ')}</p>
+                              </div>
                             </div>
-                          </div>
-                          <span className="text-sm font-bold text-mystic-400">{m.matchScore}%</span>
-                        </div>
-                      ))}
+                            <span className="text-sm font-bold text-mystic-400">{m.matchScore}%</span>
+                          </label>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-xs text-midnight-500">暂无合适的新社员推荐</p>
@@ -893,7 +997,10 @@ export default function Events() {
 
         <div className="mt-6 flex justify-end gap-3">
           <button
-            onClick={() => setShowCreateModal(false)}
+            onClick={() => {
+              setShowCreateModal(false);
+              setSelectedMemberIds([]);
+            }}
             className="px-6 py-2.5 rounded-lg font-medium text-midnight-300 hover:text-midnight-100 hover:bg-midnight-700 transition-colors"
           >
             取消

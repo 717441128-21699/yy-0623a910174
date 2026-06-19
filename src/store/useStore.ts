@@ -40,7 +40,10 @@ interface StoreState {
 
   switchUser: (userId: string) => void;
   submitQuiz: (answers: { questionId: string; optionIndex: number }[]) => void;
-  createActivity: (data: Omit<Activity, 'id' | 'createdBy' | 'createdAt' | 'status'>) => void;
+  createActivity: (
+    data: Omit<Activity, 'id' | 'createdBy' | 'createdAt' | 'status'>,
+    invitedMemberIds?: string[]
+  ) => void;
   signupActivity: (activityId: string) => void;
   cancelSignup: (activityId: string) => void;
   submitFeedback: (activityId: string, scriptRating: number, atmosphereRating: number, comment: string) => void;
@@ -48,6 +51,7 @@ interface StoreState {
   sendInvitation: (activityId: string, memberId: string, message?: string) => void;
   acceptInvitation: (invitationId: string) => void;
   declineInvitation: (invitationId: string) => void;
+  revokeInvitation: (invitationId: string) => void;
   getInvitationsByMember: (memberId: string) => (ActivityInvitation & { activity: Activity; inviter: Member })[];
   getInvitationsByActivity: (activityId: string) => (ActivityInvitation & { member: Member; inviter: Member })[];
   hasPendingInvitation: (activityId: string, memberId: string) => boolean;
@@ -57,8 +61,9 @@ interface StoreState {
     member: Member;
     isWaitlist: boolean;
     isLowMatch: boolean;
+    waitlistPosition?: number;
   })[];
-  getSignupsByMember: (memberId: string) => (ActivitySignup & { activity: Activity })[];
+  getSignupsByMember: (memberId: string) => (ActivitySignup & { activity: Activity; isWaitlist: boolean; waitlistPosition?: number })[];
   getFeedbacksByActivity: (activityId: string) => (Feedback & { member: Member })[];
   getActivitiesByStatus: (status: Activity['status']) => Activity[];
   hasSubmittedFeedback: (activityId: string, memberId: string) => boolean;
@@ -186,17 +191,34 @@ export const useStore = create<StoreState>((set, get) => {
       persist();
     },
 
-    createActivity: (data) => {
-      const { activities, currentUserId } = get();
+    createActivity: (data, invitedMemberIds) => {
+      const { activities, currentUserId, invitations } = get();
+      const activityId = `a${Date.now()}`;
       const newActivity: Activity = {
         ...data,
-        id: `a${Date.now()}`,
+        id: activityId,
         createdBy: currentUserId,
         createdAt: new Date().toISOString().split('T')[0],
         status: 'upcoming',
       };
 
-      set({ activities: [...activities, newActivity] });
+      let newInvitations = [...invitations];
+
+      if (invitedMemberIds && invitedMemberIds.length > 0) {
+        const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+        invitedMemberIds.forEach((memberId, idx) => {
+          newInvitations.push({
+            id: `inv${Date.now()}-${idx}`,
+            activityId,
+            memberId,
+            invitedBy: currentUserId,
+            status: 'pending',
+            createdAt: now,
+          });
+        });
+      }
+
+      set({ activities: [...activities, newActivity], invitations: newInvitations });
       persist();
     },
 
@@ -224,32 +246,10 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     cancelSignup: (activityId) => {
-      const { signups, currentUserId, activities } = get();
-      let newSignups = signups.filter(
+      const { signups, currentUserId } = get();
+      const newSignups = signups.filter(
         s => !(s.activityId === activityId && s.memberId === currentUserId)
       );
-
-      const activity = activities.find(a => a.id === activityId);
-      if (activity) {
-        const activitySignups = newSignups
-          .filter(s => s.activityId === activityId)
-          .map(s => {
-            const member = get().members.find(m => m.id === s.memberId)!;
-            const pref = get().preferences[member.id];
-            const freshScore = pref ? calculateMatchScore(pref.scores, activity.type) : s.matchScore;
-            return { ...s, matchScore: freshScore };
-          })
-          .sort((a, b) => b.matchScore - a.matchScore);
-
-        if (activitySignups.length > activity.totalSlots) {
-          const waitlistedIds = activitySignups.slice(activity.totalSlots).map(s => s.id);
-          newSignups = newSignups.map(s => ({
-            ...s,
-            tier: waitlistedIds.includes(s.id) ? 'substitute' : s.tier,
-          }));
-        }
-      }
-
       set({ signups: newSignups });
       persist();
     },
@@ -344,7 +344,7 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     acceptInvitation: (invitationId) => {
-      const { invitations, activities, preferences, members } = get();
+      const { invitations, activities, preferences, members, signups } = get();
       const invitation = invitations.find(i => i.id === invitationId);
       if (!invitation || invitation.status !== 'pending') return;
 
@@ -372,7 +372,7 @@ export const useStore = create<StoreState>((set, get) => {
 
       set({
         invitations: updatedInvitations,
-        signups: [...get().signups, newSignup],
+        signups: [...signups, newSignup],
       });
       persist();
     },
@@ -384,6 +384,13 @@ export const useStore = create<StoreState>((set, get) => {
           ? { ...i, status: 'declined' as InvitationStatus, respondedAt: new Date().toISOString().slice(0, 16).replace('T', ' ') }
           : i
       );
+      set({ invitations: updatedInvitations });
+      persist();
+    },
+
+    revokeInvitation: (invitationId) => {
+      const { invitations } = get();
+      const updatedInvitations = invitations.filter(i => i.id !== invitationId);
       set({ invitations: updatedInvitations });
       persist();
     },
@@ -429,7 +436,7 @@ export const useStore = create<StoreState>((set, get) => {
       const activity = activities.find(a => a.id === activityId);
       if (!activity) return [];
 
-      const activitySignups = signups
+      const allSignups = signups
         .filter(s => s.activityId === activityId)
         .map(s => {
           const member = members.find(m => m.id === s.memberId)!;
@@ -437,17 +444,24 @@ export const useStore = create<StoreState>((set, get) => {
           const freshMatchScore = pref ? calculateMatchScore(pref.scores, activity.type) : s.matchScore;
           const isLowMatch = freshMatchScore < 50;
           return { ...s, matchScore: freshMatchScore, member, isLowMatch };
-        })
-        .sort((a, b) => b.matchScore - a.matchScore);
+        });
 
-      const formalSignups = activitySignups.slice(0, activity.totalSlots);
-      const waitlistSignups = activitySignups.slice(activity.totalSlots);
+      const sortedByTime = [...allSignups].sort(
+        (a, b) => new Date(a.signedUpAt).getTime() - new Date(b.signedUpAt).getTime()
+      );
+
+      const formalSignups = sortedByTime.slice(0, activity.totalSlots);
+      const waitlistSignups = sortedByTime.slice(activity.totalSlots);
+
+      const sortedFormalByMatch = [...formalSignups].sort(
+        (a, b) => b.matchScore - a.matchScore
+      );
 
       let filledCoreSlots = 0;
       const coreSlots = Math.ceil(activity.totalSlots * 0.3);
 
       const result = [
-        ...formalSignups.map((signup) => {
+        ...sortedFormalByMatch.map((signup) => {
           let tier: 'core' | 'experience' | 'substitute';
           if (signup.isLowMatch) {
             tier = 'substitute';
@@ -457,24 +471,32 @@ export const useStore = create<StoreState>((set, get) => {
           }
           return { ...signup, tier, isWaitlist: false };
         }),
-        ...waitlistSignups.map(signup => ({
+        ...waitlistSignups.map((signup, idx) => ({
           ...signup,
+          waitlistPosition: idx + 1,
           tier: 'substitute' as const,
           isWaitlist: true,
         })),
       ];
 
-      return result;
+      return result as any;
     },
 
     getSignupsByMember: (memberId) => {
       const { signups, activities } = get();
       return signups
         .filter(s => s.memberId === memberId)
-        .map(s => ({
-          ...s,
-          activity: activities.find(a => a.id === s.activityId)!,
-        }));
+        .map(s => {
+          const activity = activities.find(a => a.id === s.activityId)!;
+          const activitySignups = get().getSignupsByActivity(s.activityId);
+          const self = activitySignups.find(signup => signup.memberId === memberId);
+          return {
+            ...s,
+            activity,
+            isWaitlist: self?.isWaitlist || false,
+            waitlistPosition: self?.waitlistPosition,
+          };
+        });
     },
 
     getFeedbacksByActivity: (activityId) => {
