@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Activity, Award, ChevronRight, Sparkles, Crown } from 'lucide-react';
+import { Calendar, Activity, Award, ChevronRight, Sparkles, Crown, Target, TrendingUp } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import GlassCard from '@/components/GlassCard';
 import TasteTag from '@/components/TasteTag';
 import Modal from '@/components/Modal';
 import { quizQuestions } from '@/utils/mockData';
-import { MEMBER_LEVEL_LABELS } from '@/types';
+import { MEMBER_LEVEL_LABELS, ACTIVITY_TYPE_LABELS, ACTIVITY_TYPE_COLORS, type ActivityType } from '@/types';
 import StarRating from '@/components/StarRating';
 
 export default function Profile() {
@@ -17,6 +17,7 @@ export default function Profile() {
   const hasSubmittedFeedback = useStore(state => state.hasSubmittedFeedback);
   const currentUserId = useStore(state => state.currentUserId);
   const isPresident = useStore(state => state.isPresident);
+  const getActivityTypeFit = useStore(state => state.getActivityTypeFit);
 
   const [showQuiz, setShowQuiz] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -35,6 +36,14 @@ export default function Profile() {
 
   const mySignups = getSignupsByMember(currentUserId);
   const endedActivities = mySignups.filter(s => s.activity.status === 'ended');
+  const activityFit = getActivityTypeFit(currentUserId);
+
+  const activityTypes: { type: ActivityType; desc: string }[] = [
+    { type: 'honkaku', desc: '逻辑推理，适合推土机' },
+    { type: 'henkaku', desc: '世界观脑洞，适合脑洞玩家' },
+    { type: 'fun', desc: '欢乐机制，适合社交达人' },
+    { type: 'mixed', desc: '综合体验，各类玩家皆宜' },
+  ];
 
   const dimensions = [
     { key: 'logicReasoning', label: '逻辑推理', color: 'bg-crimson-500' },
@@ -213,6 +222,72 @@ export default function Profile() {
                 );
               })}
             </div>
+          </GlassCard>
+
+          <GlassCard className="p-6">
+            <h4 className="font-serif text-lg font-bold text-midnight-100 mb-4 flex items-center gap-2">
+              <Target className="text-amber-400" size={20} />
+              适合的活动类型
+              {currentPreference?.hasCompletedQuiz && (
+                <span className="text-xs font-normal text-midnight-400 ml-1">
+                  根据偏好实时计算
+                </span>
+              )}
+            </h4>
+
+            {currentPreference?.hasCompletedQuiz ? (
+              <div className="grid grid-cols-2 gap-3">
+                {activityTypes.map(({ type, desc }) => {
+                  const score = activityFit[type];
+                  const percentage = score;
+
+                  return (
+                    <div
+                      key={type}
+                      className="p-3 rounded-lg bg-midnight-700/30 border border-midnight-600/50 hover:border-amber-500/30 transition-colors"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2.5 h-2.5 rounded-full ${ACTIVITY_TYPE_COLORS[type]}`} />
+                          <span className="text-sm font-medium text-midnight-100">
+                            {ACTIVITY_TYPE_LABELS[type]}
+                          </span>
+                        </div>
+                        <span
+                          className={`text-sm font-bold ${
+                            score >= 75
+                              ? 'text-mystic-400'
+                              : score >= 55
+                                ? 'text-amber-400'
+                                : 'text-midnight-400'
+                          }`}
+                        >
+                          {score}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 bg-midnight-700 rounded-full overflow-hidden mb-2">
+                        <div
+                          className={`h-full ${ACTIVITY_TYPE_COLORS[type]} rounded-full transition-all duration-1000 ease-out`}
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-midnight-400">{desc}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-midnight-400">
+                <TrendingUp size={32} className="mx-auto mb-2 opacity-50" />
+                <p className="text-sm">完成偏好测评后，这里会显示你适合的活动类型</p>
+                <button
+                  onClick={() => setShowQuiz(true)}
+                  className="mt-2 text-amber-400 hover:text-amber-300 font-medium text-sm"
+                >
+                  立即测评 →
+                </button>
+              </div>
+            )}
           </GlassCard>
         </div>
       </div>

@@ -17,7 +17,7 @@ import {
   CURRENT_USER_ID,
   quizQuestions,
 } from '@/utils/mockData';
-import { calculateMatchScore, generateTags, determineTier } from '@/utils/matching';
+import { calculateMatchScore, generateTags, determineTier, getSmartRecommendations, calculateActivityTypeFit } from '@/utils/matching';
 import { saveToStorage, loadFromStorage } from '@/utils/storage';
 
 interface StoreState {
@@ -41,13 +41,16 @@ interface StoreState {
   cancelSignup: (activityId: string) => void;
   submitFeedback: (activityId: string, scriptRating: number, atmosphereRating: number, comment: string) => void;
 
-  getSignupsByActivity: (activityId: string) => (ActivitySignup & { member: Member })[];
+  getSignupsByActivity: (activityId: string) => (ActivitySignup & { member: Member; isWaitlist: boolean })[];
   getSignupsByMember: (memberId: string) => (ActivitySignup & { activity: Activity })[];
   getFeedbacksByActivity: (activityId: string) => (Feedback & { member: Member })[];
   getActivitiesByStatus: (status: Activity['status']) => Activity[];
   hasSubmittedFeedback: (activityId: string, memberId: string) => boolean;
   isSignedUp: (activityId: string, memberId: string) => boolean;
+  isOnWaitlist: (activityId: string, memberId: string) => boolean;
   calculateVeteranRatio: (activityId: string) => { current: number; required: number; ok: boolean };
+  getActivityTypeFit: (memberId: string) => Record<ActivityType, number>;
+  getRecommendationsForActivity: (activityType: ActivityType, totalSlots: number, veteranRatio: number, activityId?: string) => ReturnType<typeof getSmartRecommendations>;
 }
 
 const initialState = {
@@ -170,16 +173,13 @@ export const useStore = create<StoreState>((set, get) => {
       if (!activity || !pref || !member) return;
 
       const matchScore = calculateMatchScore(pref.scores, activity.type);
-      const existingSignups = signups.filter(s => s.activityId === activityId);
-      const filledCoreSlots = existingSignups.filter(s => s.tier === 'core').length;
-      const tier = determineTier(matchScore, member.level, filledCoreSlots, activity.totalSlots);
 
       const newSignup: ActivitySignup = {
         id: `s${Date.now()}`,
         activityId,
         memberId: currentUserId,
         matchScore,
-        tier,
+        tier: 'experience',
         signedUpAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
       };
 
@@ -190,9 +190,25 @@ export const useStore = create<StoreState>((set, get) => {
 
     cancelSignup: (activityId) => {
       const { signups, currentUserId } = get();
-      const newSignups = signups.filter(
+      let newSignups = signups.filter(
         s => !(s.activityId === activityId && s.memberId === currentUserId)
       );
+
+      const activity = get().activities.find(a => a.id === activityId);
+      if (activity) {
+        const activitySignups = newSignups
+          .filter(s => s.activityId === activityId)
+          .sort((a, b) => b.matchScore - a.matchScore);
+
+        if (activitySignups.length > activity.totalSlots) {
+          const waitlistedIds = activitySignups.slice(activity.totalSlots).map(s => s.id);
+          newSignups = newSignups.map(s => ({
+            ...s,
+            tier: waitlistedIds.includes(s.id) ? 'substitute' : s.tier,
+          }));
+        }
+      }
+
       set({ signups: newSignups });
       saveToStorage({ ...get(), signups: newSignups });
     },
@@ -265,14 +281,36 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     getSignupsByActivity: (activityId) => {
-      const { signups, members } = get();
-      return signups
+      const { signups, members, activities, preferences } = get();
+      const activity = activities.find(a => a.id === activityId);
+      if (!activity) return [];
+
+      const activitySignups = signups
         .filter(s => s.activityId === activityId)
-        .map(s => ({
-          ...s,
-          member: members.find(m => m.id === s.memberId)!,
-        }))
+        .map(s => {
+          const member = members.find(m => m.id === s.memberId)!;
+          const pref = preferences[member.id];
+          const freshMatchScore = pref ? calculateMatchScore(pref.scores, activity.type) : s.matchScore;
+          return { ...s, matchScore: freshMatchScore, member };
+        })
         .sort((a, b) => b.matchScore - a.matchScore);
+
+      let filledCoreSlots = 0;
+      const coreSlots = Math.ceil(activity.totalSlots * 0.3);
+
+      return activitySignups.map((signup, index) => {
+        const isWaitlist = index >= activity.totalSlots;
+        let tier: 'core' | 'experience' | 'substitute';
+
+        if (isWaitlist) {
+          tier = 'substitute';
+        } else {
+          tier = determineTier(signup.matchScore, signup.member.level, filledCoreSlots, activity.totalSlots);
+          if (tier === 'core') filledCoreSlots++;
+        }
+
+        return { ...signup, tier, isWaitlist };
+      });
     },
 
     getSignupsByMember: (memberId) => {
@@ -313,6 +351,12 @@ export const useStore = create<StoreState>((set, get) => {
       );
     },
 
+    isOnWaitlist: (activityId, memberId) => {
+      const signups = get().getSignupsByActivity(activityId);
+      const signup = signups.find(s => s.memberId === memberId);
+      return signup?.isWaitlist || false;
+    },
+
     switchUser: (userId) => {
       set({ currentUserId: userId });
       saveToStorage({ ...get(), currentUserId: userId });
@@ -322,24 +366,47 @@ export const useStore = create<StoreState>((set, get) => {
       const activity = get().activities.find(a => a.id === activityId);
       if (!activity) return { current: 0, required: 0, ok: false };
 
-      const signups = get().signups.filter(s => s.activityId === activityId);
-      const totalSignups = signups.length;
-      
+      const signups = get().getSignupsByActivity(activityId);
+      const formalSignups = signups.filter(s => !s.isWaitlist);
+      const totalSignups = formalSignups.length;
+
       if (totalSignups === 0) {
         return { current: 0, required: activity.veteranRatio, ok: false };
       }
 
-      const veteranCount = signups.filter(s => {
-        const member = get().members.find(m => m.id === s.memberId);
-        return member && member.level !== 'new';
-      }).length;
-
+      const veteranCount = formalSignups.filter(s => s.member.level !== 'new').length;
       const currentRatio = veteranCount / totalSignups;
+
       return {
         current: currentRatio,
         required: activity.veteranRatio,
         ok: currentRatio >= activity.veteranRatio,
       };
     },
+
+    getActivityTypeFit: (memberId) => {
+      const pref = get().preferences[memberId];
+      if (!pref) {
+        return { honkaku: 0, henkaku: 0, fun: 0, mixed: 0 };
+      }
+      return calculateActivityTypeFit(pref.scores);
+    },
+
+    getRecommendationsForActivity: (activityType, totalSlots, veteranRatio, activityId) => {
+      const { members, preferences, signups } = get();
+      const excludeMemberIds = activityId
+        ? signups.filter(s => s.activityId === activityId).map(s => s.memberId)
+        : [];
+
+      const membersWithScores = members
+        .filter(m => preferences[m.id])
+        .map(m => ({
+          ...m,
+          scores: preferences[m.id].scores,
+        }));
+
+      return getSmartRecommendations(membersWithScores, activityType, totalSlots, veteranRatio, excludeMemberIds);
+    },
   };
 });
+
