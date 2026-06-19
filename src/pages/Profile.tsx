@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Activity, Award, ChevronRight, Sparkles, Crown, Target, TrendingUp } from 'lucide-react';
+import { Calendar, Activity, Award, ChevronRight, Sparkles, Crown, Target, TrendingUp, Clock8, Check, X, Send } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import GlassCard from '@/components/GlassCard';
 import TasteTag from '@/components/TasteTag';
 import Modal from '@/components/Modal';
 import { quizQuestions } from '@/utils/mockData';
-import { MEMBER_LEVEL_LABELS, ACTIVITY_TYPE_LABELS, ACTIVITY_TYPE_COLORS, type ActivityType } from '@/types';
+import { MEMBER_LEVEL_LABELS, ACTIVITY_TYPE_LABELS, ACTIVITY_TYPE_COLORS, type ActivityType, ACTIVITY_TYPE_LABELS as TYPE_LABELS } from '@/types';
 import StarRating from '@/components/StarRating';
 
 export default function Profile() {
@@ -18,6 +18,11 @@ export default function Profile() {
   const currentUserId = useStore(state => state.currentUserId);
   const isPresident = useStore(state => state.isPresident);
   const getActivityTypeFit = useStore(state => state.getActivityTypeFit);
+  const getInvitationsByMember = useStore(state => state.getInvitationsByMember);
+  const acceptInvitation = useStore(state => state.acceptInvitation);
+  const declineInvitation = useStore(state => state.declineInvitation);
+  const isSignedUp = useStore(state => state.isSignedUp);
+  const signupActivity = useStore(state => state.signupActivity);
 
   const [showQuiz, setShowQuiz] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -37,6 +42,8 @@ export default function Profile() {
   const mySignups = getSignupsByMember(currentUserId);
   const endedActivities = mySignups.filter(s => s.activity.status === 'ended');
   const activityFit = getActivityTypeFit(currentUserId);
+  const myInvitations = getInvitationsByMember(currentUserId);
+  const pendingInvitations = myInvitations.filter(i => i.status === 'pending');
 
   const activityTypes: { type: ActivityType; desc: string }[] = [
     { type: 'honkaku', desc: '逻辑推理，适合推土机' },
@@ -108,6 +115,78 @@ export default function Profile() {
           </button>
         )}
       </div>
+
+      {pendingInvitations.length > 0 && (
+        <GlassCard className="p-5 border border-amber-500/30 bg-amber-500/5">
+          <h3 className="font-serif text-lg font-bold text-amber-400 mb-4 flex items-center gap-2">
+            <Clock8 size={20} />
+            待确认邀请 ({pendingInvitations.length})
+            <span className="text-xs font-normal text-midnight-400 ml-2">
+              社长邀请你参加活动
+            </span>
+          </h3>
+          <div className="space-y-3">
+            {pendingInvitations.map(inv => (
+              <div key={inv.id} className="flex items-center justify-between p-4 bg-midnight-800/60 rounded-lg border border-amber-500/20">
+                <div className="flex items-center gap-4">
+                  <img
+                    src={inv.inviter.avatar}
+                    alt={inv.inviter.name}
+                    className="w-12 h-12 rounded-full"
+                  />
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="text-sm font-medium text-midnight-100">
+                        {inv.inviter.name} 邀请你参加
+                      </p>
+                      <TasteTag
+                        label={TYPE_LABELS[inv.activity.type]}
+                        size="sm"
+                        variant={
+                          inv.activity.type === 'honkaku' ? 'danger' :
+                          inv.activity.type === 'henkaku' ? 'mystic' :
+                          inv.activity.type === 'fun' ? 'gold' : 'default'
+                        }
+                      />
+                    </div>
+                    <p className="font-medium text-amber-400">{inv.activity.title}</p>
+                    <p className="text-xs text-midnight-400">
+                      {inv.activity.scriptName} · {inv.activity.date} {inv.activity.time}
+                    </p>
+                    {inv.message && (
+                      <p className="text-xs text-midnight-300 mt-1 italic">
+                        "{inv.message}"
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!isSignedUp(inv.activity.id, currentUserId) ? (
+                    <>
+                      <button
+                        onClick={() => declineInvitation(inv.id)}
+                        className="px-4 py-2 bg-crimson-500/20 text-crimson-400 hover:bg-crimson-500/30 font-medium text-sm rounded-lg transition-colors flex items-center gap-1.5 border border-crimson-500/30"
+                      >
+                        <X size={16} />
+                        拒绝
+                      </button>
+                      <button
+                        onClick={() => acceptInvitation(inv.id)}
+                        className="px-4 py-2 bg-gradient-gold text-midnight-900 font-medium text-sm rounded-lg hover:shadow-gold-lg transition-all flex items-center gap-1.5"
+                      >
+                        <Check size={16} />
+                        接受
+                      </button>
+                    </>
+                  ) : (
+                    <TasteTag label="已报名" variant="success" size="sm" />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <GlassCard className="p-6 lg:col-span-1" glow>

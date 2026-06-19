@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Plus, Calendar, Clock, Users, ChevronDown, ChevronUp, Crown, Zap, Coffee, AlertTriangle, CheckCircle, ListPlus, Sparkles, Star, ArrowUp } from 'lucide-react';
+import { Plus, Calendar, Clock, Users, ChevronDown, ChevronUp, Crown, Zap, Coffee, AlertTriangle, CheckCircle, ListPlus, Sparkles, Star, ArrowUp, Send, X, Clock8 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import GlassCard from '@/components/GlassCard';
 import TasteTag from '@/components/TasteTag';
 import Modal from '@/components/Modal';
-import { ACTIVITY_TYPE_LABELS, ACTIVITY_TYPE_COLORS, TIER_LABELS, type ActivityType, MEMBER_LEVEL_LABELS } from '@/types';
+import { ACTIVITY_TYPE_LABELS, ACTIVITY_TYPE_COLORS, TIER_LABELS, type ActivityType, MEMBER_LEVEL_LABELS, INVITATION_STATUS_LABELS } from '@/types';
+import { getRecommendReason } from '@/utils/matching';
 
 export default function Events() {
   const isPresident = useStore(state => state.isPresident);
@@ -13,16 +14,21 @@ export default function Events() {
   const signupActivity = useStore(state => state.signupActivity);
   const cancelSignup = useStore(state => state.cancelSignup);
   const getSignupsByActivity = useStore(state => state.getSignupsByActivity);
+  const getInvitationsByActivity = useStore(state => state.getInvitationsByActivity);
+  const sendInvitation = useStore(state => state.sendInvitation);
   const isSignedUp = useStore(state => state.isSignedUp);
   const isOnWaitlist = useStore(state => state.isOnWaitlist);
   const currentUserId = useStore(state => state.currentUserId);
   const getPreferenceByMemberId = useStore(state => state.getPreferenceByMemberId);
   const calculateVeteranRatio = useStore(state => state.calculateVeteranRatio);
   const getRecommendationsForActivity = useStore(state => state.getRecommendationsForActivity);
+  const hasPendingInvitation = useStore(state => state.hasPendingInvitation);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [expandedActivity, setExpandedActivity] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<ActivityType | 'all'>('all');
+  const [inviteMessage, setInviteMessage] = useState('');
+  const [showInviteModal, setShowInviteModal] = useState<string | null>(null);
 
   const [newActivity, setNewActivity] = useState({
     title: '',
@@ -79,12 +85,20 @@ export default function Events() {
     }
   };
 
+  const handleSendInvitation = (activityId: string, memberId: string) => {
+    const message = inviteMessage.trim() || undefined;
+    sendInvitation(activityId, memberId, message);
+    setInviteMessage('');
+    setShowInviteModal(null);
+  };
+
   const toggleExpand = (activityId: string) => {
     setExpandedActivity(expandedActivity === activityId ? null : activityId);
   };
 
   const renderActivityCard = (activity: typeof activities[0], isEnded = false) => {
     const signups = getSignupsByActivity(activity.id);
+    const invitations = getInvitationsByActivity(activity.id);
     const signedUp = isSignedUp(activity.id, currentUserId);
     const onWaitlist = isOnWaitlist(activity.id, currentUserId);
     const isExpanded = expandedActivity === activity.id;
@@ -94,12 +108,18 @@ export default function Events() {
     const formalSignups = signups.filter(s => !s.isWaitlist);
     const waitlistSignups = signups.filter(s => s.isWaitlist);
 
-    const coreSignups = formalSignups.filter(s => s.tier === 'core');
-    const experienceSignups = formalSignups.filter(s => s.tier === 'experience');
+    const coreSignups = formalSignups.filter(s => s.tier === 'core' && !s.isLowMatch);
+    const experienceSignups = formalSignups.filter(s => s.tier === 'experience' && !s.isLowMatch);
+    const lowMatchSignups = formalSignups.filter(s => s.isLowMatch);
+
+    const pendingInvitations = invitations.filter(i => i.status === 'pending');
 
     const veteranRatio = calculateVeteranRatio(activity.id);
-    const actualRatio = veteranRatio.current;
     const ratioOk = veteranRatio.ok;
+
+    const activityRecommendations = isPresident && !isEnded
+      ? getRecommendationsForActivity(activity.type, activity.totalSlots, activity.veteranRatio, activity.id)
+      : null;
 
     return (
       <GlassCard
@@ -130,6 +150,9 @@ export default function Events() {
                   variant={onWaitlist ? 'default' : 'success'}
                   size="sm"
                 />
+              )}
+              {pendingInvitations.length > 0 && (
+                <TasteTag label={`邀请 ${pendingInvitations.length}`} variant="default" size="sm" />
               )}
               {waitlistCount > 0 && !isEnded && (
                 <TasteTag label={`候补 ${waitlistCount}人`} variant="default" size="sm" />
@@ -168,7 +191,7 @@ export default function Events() {
                   key={signup.id}
                   src={signup.member.avatar}
                   alt={signup.member.name}
-                  className="w-8 h-8 rounded-full border-2 border-midnight-800"
+                  className={`w-8 h-8 rounded-full border-2 border-midnight-800 ${signup.isLowMatch ? 'opacity-50' : ''}`}
                 />
               ))}
               {formalSignups.length > 5 && (
@@ -216,27 +239,174 @@ export default function Events() {
         {isExpanded && (
           <div className="border-t border-amber-500/10 p-5 bg-midnight-900/50">
             {isPresident && !isEnded && (
-              <div className={`mb-4 p-3 rounded-lg flex items-center gap-3 ${
-                ratioOk ? 'bg-mystic-500/10 border border-mystic-500/30' : 'bg-crimson-500/10 border border-crimson-500/30'
-              }`}>
-                {ratioOk ? (
-                  <CheckCircle className="text-mystic-400 shrink-0" size={20} />
-                ) : (
-                  <AlertTriangle className="text-crimson-400 shrink-0" size={20} />
-                )}
-                <div className="flex-1">
-                  <p className={`text-sm font-medium ${ratioOk ? 'text-mystic-400' : 'text-crimson-400'}`}>
-                    老带新比例：{Math.round(actualRatio * 100)}% / 目标 {Math.round(activity.veteranRatio * 100)}%
-                  </p>
-                  <p className="text-xs text-midnight-400">
-                    {ratioOk
-                      ? `老带新比例达标！当前 ${formalSignups.filter(s => s.member.level !== 'new').length} 位老玩家`
-                      : `还差 ${Math.ceil(activity.totalSlots * activity.veteranRatio) - formalSignups.filter(s => s.member.level !== 'new').length} 位老玩家`}
-                  </p>
+              <>
+                <div className={`mb-4 p-4 rounded-lg ${
+                  ratioOk ? 'bg-mystic-500/10 border border-mystic-500/30' : 'bg-crimson-500/10 border border-crimson-500/30'
+                }`}>
+                  <div className="flex items-start gap-3">
+                    {ratioOk ? (
+                      <CheckCircle className="text-mystic-400 shrink-0 mt-0.5" size={22} />
+                    ) : (
+                      <AlertTriangle className="text-crimson-400 shrink-0 mt-0.5" size={22} />
+                    )}
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className={`text-sm font-bold ${ratioOk ? 'text-mystic-400' : 'text-crimson-400'}`}>
+                          老带新比例：{Math.round(veteranRatio.current * 100)}% / 目标 {Math.round(activity.veteranRatio * 100)}%
+                        </p>
+                        <div className="text-xs text-midnight-400">
+                          正式 {totalFormal}人 · 候补 {waitlistCount}人
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2 text-sm mt-3">
+                        <div className="bg-midnight-800/60 rounded p-2 text-center">
+                          <p className="text-amber-400 font-bold">{veteranRatio.veteranCount}</p>
+                          <p className="text-xs text-midnight-400">老玩家</p>
+                        </div>
+                        <div className="bg-midnight-800/60 rounded p-2 text-center">
+                          <p className="text-mystic-400 font-bold">{veteranRatio.newbieCount}</p>
+                          <p className="text-xs text-midnight-400">新社员</p>
+                        </div>
+                        <div className="bg-midnight-800/60 rounded p-2 text-center">
+                          <p className={`font-bold ${veteranRatio.needMoreVeterans > 0 ? 'text-crimson-400' : 'text-mystic-400'}`}>
+                            {veteranRatio.needMoreVeterans > 0 ? `缺${veteranRatio.needMoreVeterans}` : '够了'}
+                          </p>
+                          <p className="text-xs text-midnight-400">还差老玩家</p>
+                        </div>
+                        <div className="bg-midnight-800/60 rounded p-2 text-center">
+                          <p className={`font-bold ${veteranRatio.needMoreNewbies > 0 ? 'text-crimson-400' : 'text-mystic-400'}`}>
+                            {veteranRatio.needMoreNewbies > 0 ? `缺${veteranRatio.needMoreNewbies}` : '够了'}
+                          </p>
+                          <p className="text-xs text-midnight-400">还差新社员</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="text-xs text-midnight-400 text-right">
-                  <p>正式：{totalFormal}人</p>
-                  <p>候补：{waitlistCount}人</p>
+
+                {activityRecommendations && (
+                  <div className="mb-4 border border-amber-500/20 rounded-xl p-4 bg-amber-500/5">
+                    <h5 className="font-serif text-base font-bold text-amber-400 mb-3 flex items-center gap-2">
+                      <Sparkles size={16} />
+                      智能推荐邀请
+                      <span className="text-xs font-normal text-midnight-400 ml-2">
+                        点击「邀请」按钮直接发送邀请
+                      </span>
+                    </h5>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-midnight-300 mb-2">
+                          推荐老玩家 {activityRecommendations.neededVeterans > 0 &&
+                            <span className="text-crimson-400">（还差 {activityRecommendations.neededVeterans} 位）</span>}
+                        </p>
+                        {activityRecommendations.recommendedVeterans.length > 0 ? (
+                          <div className="space-y-2">
+                            {activityRecommendations.recommendedVeterans.map(m => {
+                              const pref = getPreferenceByMemberId(m.id);
+                              const reasons = pref ? getRecommendReason(pref.scores, activity.type, m.level) : [];
+                              const invited = hasPendingInvitation(activity.id, m.id);
+                              return (
+                                <div key={m.id} className="flex items-center justify-between p-2.5 bg-midnight-800/60 rounded-lg">
+                                  <div className="flex items-center gap-2.5">
+                                    <img src={m.avatar} alt={m.name} className="w-8 h-8 rounded-full" />
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium text-midnight-100 flex items-center gap-1.5">
+                                        {m.name}
+                                        {invited && <TasteTag label="已邀请" size="sm" variant="default" />}
+                                      </p>
+                                      <p className="text-xs text-midnight-400 truncate">{reasons.join(' · ')}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-bold text-crimson-400">{m.matchScore}%</span>
+                                    {!invited && (
+                                      <button
+                                        onClick={() => setShowInviteModal(`${activity.id}-${m.id}`)}
+                                        className="px-2.5 py-1 bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+                                      >
+                                        <Send size={12} />
+                                        邀请
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-midnight-500 py-2">暂无推荐</p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-midnight-300 mb-2">
+                          推荐新社员 {activityRecommendations.neededNewbies > 0 &&
+                            <span className="text-crimson-400">（还差 {activityRecommendations.neededNewbies} 位）</span>}
+                        </p>
+                        {activityRecommendations.recommendedNewbies.length > 0 ? (
+                          <div className="space-y-2">
+                            {activityRecommendations.recommendedNewbies.map(m => {
+                              const pref = getPreferenceByMemberId(m.id);
+                              const reasons = pref ? getRecommendReason(pref.scores, activity.type, m.level) : [];
+                              const invited = hasPendingInvitation(activity.id, m.id);
+                              return (
+                                <div key={m.id} className="flex items-center justify-between p-2.5 bg-midnight-800/60 rounded-lg">
+                                  <div className="flex items-center gap-2.5">
+                                    <img src={m.avatar} alt={m.name} className="w-8 h-8 rounded-full" />
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium text-midnight-100 flex items-center gap-1.5">
+                                        {m.name}
+                                        {invited && <TasteTag label="已邀请" size="sm" variant="default" />}
+                                      </p>
+                                      <p className="text-xs text-midnight-400 truncate">{reasons.join(' · ')}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-bold text-mystic-400">{m.matchScore}%</span>
+                                    {!invited && (
+                                      <button
+                                        onClick={() => setShowInviteModal(`${activity.id}-${m.id}`)}
+                                        className="px-2.5 py-1 bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+                                      >
+                                        <Send size={12} />
+                                        邀请
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-midnight-500 py-2">暂无推荐</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {pendingInvitations.length > 0 && (
+              <div className="mb-4">
+                <h5 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-2">
+                  <Clock8 size={16} />
+                  待确认邀请 ({pendingInvitations.length})
+                </h5>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {pendingInvitations.map(inv => (
+                    <div key={inv.id} className="flex items-center gap-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                      <img src={inv.member.avatar} alt={inv.member.name} className="w-9 h-9 rounded-full" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-midnight-100">{inv.member.name}</p>
+                        {inv.message && (
+                          <p className="text-xs text-midnight-400 truncate">"{inv.message}"</p>
+                        )}
+                        <p className="text-xs text-midnight-500">{inv.createdAt}</p>
+                      </div>
+                      <TasteTag label={INVITATION_STATUS_LABELS[inv.status]} size="sm" variant="default" />
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -332,6 +502,44 @@ export default function Events() {
                 )}
               </div>
 
+              {lowMatchSignups.length > 0 && (
+                <div>
+                  <h5 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-2">
+                    <AlertTriangle size={16} />
+                    待调整 ({lowMatchSignups.length})
+                    <span className="text-xs font-normal text-midnight-500">匹配度{'<'}50%，可考虑调整</span>
+                  </h5>
+                  <div className="space-y-2">
+                    {lowMatchSignups.map(signup => (
+                      <div key={signup.id} className="flex items-center justify-between p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                        <div className="flex items-center gap-3">
+                          <div className="relative">
+                            <img
+                              src={signup.member.avatar}
+                              alt={signup.member.name}
+                              className="w-9 h-9 rounded-full opacity-70"
+                            />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-midnight-200 flex items-center gap-2">
+                              {signup.member.name}
+                              <TasteTag label={MEMBER_LEVEL_LABELS[signup.member.level]} size="sm" variant="default" />
+                            </p>
+                            <p className="text-xs text-midnight-400">
+                              {getPreferenceByMemberId(signup.member.id)?.tags.slice(0, 2).join(' · ') || '暂无标签'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-amber-400">{signup.matchScore}%</p>
+                          <p className="text-xs text-midnight-500">匹配度低</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {waitlistSignups.length > 0 && (
                 <div>
                   <h5 className="text-sm font-bold text-amber-400 mb-2 flex items-center gap-2">
@@ -372,6 +580,58 @@ export default function Events() {
               )}
             </div>
           </div>
+        )}
+
+        {showInviteModal?.startsWith(`${activity.id}-`) && (
+          <Modal
+            isOpen={true}
+            onClose={() => setShowInviteModal(null)}
+            title="发送邀请"
+            size="sm"
+          >
+            {(() => {
+              const memberId = showInviteModal.split('-')[1];
+              const member = useStore.getState().members.find(m => m.id === memberId);
+              return member ? (
+                <>
+                  <div className="flex items-center gap-3 mb-4 p-3 bg-midnight-700/30 rounded-lg">
+                    <img src={member.avatar} alt={member.name} className="w-12 h-12 rounded-full" />
+                    <div>
+                      <p className="font-medium text-midnight-100">{member.name}</p>
+                      <p className="text-sm text-midnight-400">{MEMBER_LEVEL_LABELS[member.level]}</p>
+                    </div>
+                  </div>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-midnight-200 mb-2">
+                      附言（可选）
+                    </label>
+                    <textarea
+                      value={inviteMessage}
+                      onChange={e => setInviteMessage(e.target.value)}
+                      placeholder="例如：周六推理局缺个老玩家撑场子，来吗？"
+                      rows={2}
+                      className="w-full px-4 py-3 bg-midnight-700/50 border border-midnight-600 rounded-lg text-midnight-100 placeholder-midnight-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/30 transition-colors resize-none"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button
+                      onClick={() => setShowInviteModal(null)}
+                      className="px-5 py-2 rounded-lg font-medium text-midnight-300 hover:text-midnight-100 hover:bg-midnight-700 transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={() => handleSendInvitation(activity.id, memberId)}
+                      className="px-5 py-2 bg-gradient-gold text-midnight-900 font-medium rounded-lg hover:shadow-gold-lg transition-all flex items-center gap-2"
+                    >
+                      <Send size={16} />
+                      发送邀请
+                    </button>
+                  </div>
+                </>
+              ) : null;
+            })()}
+          </Modal>
         )}
       </GlassCard>
     );
@@ -588,7 +848,7 @@ export default function Events() {
                   <p className="text-sm font-medium text-midnight-300 mb-2">推荐老玩家</p>
                   {recommendations.recommendedVeterans.length > 0 ? (
                     <div className="space-y-2">
-                      {recommendations.recommendedVeterans.map(m => (
+                      {recommendations.recommendedVeterans.slice(0, 3).map(m => (
                         <div key={m.id} className="flex items-center justify-between p-2 bg-midnight-800/60 rounded-lg">
                           <div className="flex items-center gap-2">
                             <img src={m.avatar} alt={m.name} className="w-7 h-7 rounded-full" />
@@ -609,7 +869,7 @@ export default function Events() {
                   <p className="text-sm font-medium text-midnight-300 mb-2">推荐新社员</p>
                   {recommendations.recommendedNewbies.length > 0 ? (
                     <div className="space-y-2">
-                      {recommendations.recommendedNewbies.map(m => (
+                      {recommendations.recommendedNewbies.slice(0, 3).map(m => (
                         <div key={m.id} className="flex items-center justify-between p-2 bg-midnight-800/60 rounded-lg">
                           <div className="flex items-center gap-2">
                             <img src={m.avatar} alt={m.name} className="w-7 h-7 rounded-full" />

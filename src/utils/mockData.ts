@@ -1,4 +1,4 @@
-import type { Member, Preference, Activity, ActivitySignup, Feedback, QuizQuestion } from '@/types';
+import type { Member, Preference, Activity, ActivitySignup, Feedback, QuizQuestion, ActivityInvitation } from '@/types';
 
 export const mockMembers: Member[] = [
   {
@@ -404,3 +404,26 @@ export const quizQuestions: QuizQuestion[] = [
 ];
 
 export const CURRENT_USER_ID = 'm3';
+
+export const mockInvitations: ActivityInvitation[] = [
+  {
+    id: 'inv1',
+    activityId: 'a1',
+    memberId: 'm5',
+    invitedBy: 'm1',
+    status: 'pending',
+    message: '周六推理局缺个老玩家撑场子，来吗？',
+    createdAt: '2025-06-19 14:30',
+  },
+  {
+    id: 'inv2',
+    activityId: 'a2',
+    memberId: 'm4',
+    invitedBy: 'm1',
+    status: 'declined',
+    message: '周日变格本需要个逻辑强的，来补个位呗',
+    createdAt: '2025-06-18 10:00',
+    respondedAt: '2025-06-18 12:00',
+  },
+];
+

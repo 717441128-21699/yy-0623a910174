@@ -7,6 +7,8 @@ import type {
   Feedback,
   PreferenceScores,
   ActivityType,
+  ActivityInvitation,
+  InvitationStatus,
 } from '@/types';
 import {
   mockMembers,
@@ -14,6 +16,7 @@ import {
   mockActivities,
   mockSignups,
   mockFeedbacks,
+  mockInvitations,
   CURRENT_USER_ID,
   quizQuestions,
 } from '@/utils/mockData';
@@ -27,6 +30,7 @@ interface StoreState {
   activities: Activity[];
   signups: ActivitySignup[];
   feedbacks: Feedback[];
+  invitations: ActivityInvitation[];
 
   get isPresident(): boolean;
   getCurrentMember: () => Member | undefined;
@@ -41,16 +45,41 @@ interface StoreState {
   cancelSignup: (activityId: string) => void;
   submitFeedback: (activityId: string, scriptRating: number, atmosphereRating: number, comment: string) => void;
 
-  getSignupsByActivity: (activityId: string) => (ActivitySignup & { member: Member; isWaitlist: boolean })[];
+  sendInvitation: (activityId: string, memberId: string, message?: string) => void;
+  acceptInvitation: (invitationId: string) => void;
+  declineInvitation: (invitationId: string) => void;
+  getInvitationsByMember: (memberId: string) => (ActivityInvitation & { activity: Activity; inviter: Member })[];
+  getInvitationsByActivity: (activityId: string) => (ActivityInvitation & { member: Member; inviter: Member })[];
+  hasPendingInvitation: (activityId: string, memberId: string) => boolean;
+  hasDeclinedInvitation: (activityId: string, memberId: string) => boolean;
+
+  getSignupsByActivity: (activityId: string) => (ActivitySignup & {
+    member: Member;
+    isWaitlist: boolean;
+    isLowMatch: boolean;
+  })[];
   getSignupsByMember: (memberId: string) => (ActivitySignup & { activity: Activity })[];
   getFeedbacksByActivity: (activityId: string) => (Feedback & { member: Member })[];
   getActivitiesByStatus: (status: Activity['status']) => Activity[];
   hasSubmittedFeedback: (activityId: string, memberId: string) => boolean;
   isSignedUp: (activityId: string, memberId: string) => boolean;
   isOnWaitlist: (activityId: string, memberId: string) => boolean;
-  calculateVeteranRatio: (activityId: string) => { current: number; required: number; ok: boolean };
+  calculateVeteranRatio: (activityId: string) => {
+    current: number;
+    required: number;
+    ok: boolean;
+    veteranCount: number;
+    newbieCount: number;
+    needMoreVeterans: number;
+    needMoreNewbies: number;
+  };
   getActivityTypeFit: (memberId: string) => Record<ActivityType, number>;
-  getRecommendationsForActivity: (activityType: ActivityType, totalSlots: number, veteranRatio: number, activityId?: string) => ReturnType<typeof getSmartRecommendations>;
+  getRecommendationsForActivity: (
+    activityType: ActivityType,
+    totalSlots: number,
+    veteranRatio: number,
+    activityId?: string
+  ) => ReturnType<typeof getSmartRecommendations>;
 }
 
 const initialState = {
@@ -60,6 +89,7 @@ const initialState = {
   activities: mockActivities,
   signups: mockSignups,
   feedbacks: mockFeedbacks,
+  invitations: mockInvitations,
 };
 
 function getInitialState() {
@@ -69,6 +99,8 @@ function getInitialState() {
 
 export const useStore = create<StoreState>((set, get) => {
   const state = getInitialState();
+
+  const persist = () => saveToStorage(get());
 
   return {
     ...state,
@@ -92,6 +124,11 @@ export const useStore = create<StoreState>((set, get) => {
 
     getPreferenceByMemberId: (id: string) => {
       return get().preferences[id];
+    },
+
+    switchUser: (userId) => {
+      set({ currentUserId: userId });
+      persist();
     },
 
     submitQuiz: (answers) => {
@@ -146,7 +183,7 @@ export const useStore = create<StoreState>((set, get) => {
       };
 
       set({ preferences: newPreferences });
-      saveToStorage({ ...get(), preferences: newPreferences });
+      persist();
     },
 
     createActivity: (data) => {
@@ -159,9 +196,8 @@ export const useStore = create<StoreState>((set, get) => {
         status: 'upcoming',
       };
 
-      const newActivities = [...activities, newActivity];
-      set({ activities: newActivities });
-      saveToStorage({ ...get(), activities: newActivities });
+      set({ activities: [...activities, newActivity] });
+      persist();
     },
 
     signupActivity: (activityId) => {
@@ -183,21 +219,26 @@ export const useStore = create<StoreState>((set, get) => {
         signedUpAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
       };
 
-      const newSignups = [...signups, newSignup];
-      set({ signups: newSignups });
-      saveToStorage({ ...get(), signups: newSignups });
+      set({ signups: [...signups, newSignup] });
+      persist();
     },
 
     cancelSignup: (activityId) => {
-      const { signups, currentUserId } = get();
+      const { signups, currentUserId, activities } = get();
       let newSignups = signups.filter(
         s => !(s.activityId === activityId && s.memberId === currentUserId)
       );
 
-      const activity = get().activities.find(a => a.id === activityId);
+      const activity = activities.find(a => a.id === activityId);
       if (activity) {
         const activitySignups = newSignups
           .filter(s => s.activityId === activityId)
+          .map(s => {
+            const member = get().members.find(m => m.id === s.memberId)!;
+            const pref = get().preferences[member.id];
+            const freshScore = pref ? calculateMatchScore(pref.scores, activity.type) : s.matchScore;
+            return { ...s, matchScore: freshScore };
+          })
           .sort((a, b) => b.matchScore - a.matchScore);
 
         if (activitySignups.length > activity.totalSlots) {
@@ -210,7 +251,7 @@ export const useStore = create<StoreState>((set, get) => {
       }
 
       set({ signups: newSignups });
-      saveToStorage({ ...get(), signups: newSignups });
+      persist();
     },
 
     submitFeedback: (activityId, scriptRating, atmosphereRating, comment) => {
@@ -277,7 +318,110 @@ export const useStore = create<StoreState>((set, get) => {
         }
       }
 
-      saveToStorage({ ...get(), feedbacks: newFeedbacks });
+      persist();
+    },
+
+    sendInvitation: (activityId, memberId, message) => {
+      const { invitations, currentUserId } = get();
+
+      const existing = invitations.find(
+        i => i.activityId === activityId && i.memberId === memberId && i.status !== 'declined'
+      );
+      if (existing) return;
+
+      const newInvitation: ActivityInvitation = {
+        id: `inv${Date.now()}`,
+        activityId,
+        memberId,
+        invitedBy: currentUserId,
+        status: 'pending',
+        message,
+        createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      };
+
+      set({ invitations: [...invitations, newInvitation] });
+      persist();
+    },
+
+    acceptInvitation: (invitationId) => {
+      const { invitations, activities, preferences, members } = get();
+      const invitation = invitations.find(i => i.id === invitationId);
+      if (!invitation || invitation.status !== 'pending') return;
+
+      const activity = activities.find(a => a.id === invitation.activityId);
+      const pref = preferences[invitation.memberId];
+      const member = members.find(m => m.id === invitation.memberId);
+
+      if (!activity || !pref || !member) return;
+
+      const matchScore = calculateMatchScore(pref.scores, activity.type);
+      const newSignup: ActivitySignup = {
+        id: `s${Date.now()}`,
+        activityId: invitation.activityId,
+        memberId: invitation.memberId,
+        matchScore,
+        tier: 'experience',
+        signedUpAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      };
+
+      const updatedInvitations = invitations.map(i =>
+        i.id === invitationId
+          ? { ...i, status: 'accepted' as InvitationStatus, respondedAt: new Date().toISOString().slice(0, 16).replace('T', ' ') }
+          : i
+      );
+
+      set({
+        invitations: updatedInvitations,
+        signups: [...get().signups, newSignup],
+      });
+      persist();
+    },
+
+    declineInvitation: (invitationId) => {
+      const { invitations } = get();
+      const updatedInvitations = invitations.map(i =>
+        i.id === invitationId
+          ? { ...i, status: 'declined' as InvitationStatus, respondedAt: new Date().toISOString().slice(0, 16).replace('T', ' ') }
+          : i
+      );
+      set({ invitations: updatedInvitations });
+      persist();
+    },
+
+    getInvitationsByMember: (memberId) => {
+      const { invitations, activities, members } = get();
+      return invitations
+        .filter(i => i.memberId === memberId)
+        .map(i => ({
+          ...i,
+          activity: activities.find(a => a.id === i.activityId)!,
+          inviter: members.find(m => m.id === i.invitedBy)!,
+        }))
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    },
+
+    getInvitationsByActivity: (activityId) => {
+      const { invitations, members } = get();
+      return invitations
+        .filter(i => i.activityId === activityId)
+        .map(i => ({
+          ...i,
+          member: members.find(m => m.id === i.memberId)!,
+          inviter: members.find(m => m.id === i.invitedBy)!,
+        }))
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    },
+
+    hasPendingInvitation: (activityId, memberId) => {
+      return get().invitations.some(
+        i => i.activityId === activityId && i.memberId === memberId && i.status === 'pending'
+      );
+    },
+
+    hasDeclinedInvitation: (activityId, memberId) => {
+      return get().invitations.some(
+        i => i.activityId === activityId && i.memberId === memberId && i.status === 'declined'
+      );
     },
 
     getSignupsByActivity: (activityId) => {
@@ -291,26 +435,36 @@ export const useStore = create<StoreState>((set, get) => {
           const member = members.find(m => m.id === s.memberId)!;
           const pref = preferences[member.id];
           const freshMatchScore = pref ? calculateMatchScore(pref.scores, activity.type) : s.matchScore;
-          return { ...s, matchScore: freshMatchScore, member };
+          const isLowMatch = freshMatchScore < 50;
+          return { ...s, matchScore: freshMatchScore, member, isLowMatch };
         })
         .sort((a, b) => b.matchScore - a.matchScore);
+
+      const formalSignups = activitySignups.slice(0, activity.totalSlots);
+      const waitlistSignups = activitySignups.slice(activity.totalSlots);
 
       let filledCoreSlots = 0;
       const coreSlots = Math.ceil(activity.totalSlots * 0.3);
 
-      return activitySignups.map((signup, index) => {
-        const isWaitlist = index >= activity.totalSlots;
-        let tier: 'core' | 'experience' | 'substitute';
+      const result = [
+        ...formalSignups.map((signup) => {
+          let tier: 'core' | 'experience' | 'substitute';
+          if (signup.isLowMatch) {
+            tier = 'substitute';
+          } else {
+            tier = determineTier(signup.matchScore, signup.member.level, filledCoreSlots, activity.totalSlots);
+            if (tier === 'core') filledCoreSlots++;
+          }
+          return { ...signup, tier, isWaitlist: false };
+        }),
+        ...waitlistSignups.map(signup => ({
+          ...signup,
+          tier: 'substitute' as const,
+          isWaitlist: true,
+        })),
+      ];
 
-        if (isWaitlist) {
-          tier = 'substitute';
-        } else {
-          tier = determineTier(signup.matchScore, signup.member.level, filledCoreSlots, activity.totalSlots);
-          if (tier === 'core') filledCoreSlots++;
-        }
-
-        return { ...signup, tier, isWaitlist };
-      });
+      return result;
     },
 
     getSignupsByMember: (memberId) => {
@@ -357,30 +511,30 @@ export const useStore = create<StoreState>((set, get) => {
       return signup?.isWaitlist || false;
     },
 
-    switchUser: (userId) => {
-      set({ currentUserId: userId });
-      saveToStorage({ ...get(), currentUserId: userId });
-    },
-
     calculateVeteranRatio: (activityId) => {
       const activity = get().activities.find(a => a.id === activityId);
-      if (!activity) return { current: 0, required: 0, ok: false };
+      if (!activity) return { current: 0, required: 0, ok: false, veteranCount: 0, newbieCount: 0, needMoreVeterans: 0, needMoreNewbies: 0 };
 
       const signups = get().getSignupsByActivity(activityId);
       const formalSignups = signups.filter(s => !s.isWaitlist);
       const totalSignups = formalSignups.length;
 
-      if (totalSignups === 0) {
-        return { current: 0, required: activity.veteranRatio, ok: false };
-      }
-
       const veteranCount = formalSignups.filter(s => s.member.level !== 'new').length;
-      const currentRatio = veteranCount / totalSignups;
+      const newbieCount = formalSignups.filter(s => s.member.level === 'new').length;
+
+      const neededVeterans = Math.ceil(activity.totalSlots * activity.veteranRatio);
+      const neededNewbies = activity.totalSlots - neededVeterans;
+
+      const currentRatio = totalSignups > 0 ? veteranCount / totalSignups : 0;
 
       return {
         current: currentRatio,
         required: activity.veteranRatio,
         ok: currentRatio >= activity.veteranRatio,
+        veteranCount,
+        newbieCount,
+        needMoreVeterans: Math.max(0, neededVeterans - veteranCount),
+        needMoreNewbies: Math.max(0, neededNewbies - newbieCount),
       };
     },
 
@@ -393,10 +547,18 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     getRecommendationsForActivity: (activityType, totalSlots, veteranRatio, activityId) => {
-      const { members, preferences, signups } = get();
-      const excludeMemberIds = activityId
-        ? signups.filter(s => s.activityId === activityId).map(s => s.memberId)
-        : [];
+      const { members, preferences, signups, invitations } = get();
+
+      const alreadyInvitedOrJoined = [
+        ...signups.filter(s => s.activityId === activityId).map(s => s.memberId),
+        ...invitations.filter(i => i.activityId === activityId && i.status !== 'declined').map(i => i.memberId),
+      ];
+
+      const declinedMemberIds = invitations
+        .filter(i => i.activityId === activityId && i.status === 'declined')
+        .map(i => i.memberId);
+
+      const excludeMemberIds = [...alreadyInvitedOrJoined, ...declinedMemberIds];
 
       const membersWithScores = members
         .filter(m => preferences[m.id])
@@ -409,4 +571,3 @@ export const useStore = create<StoreState>((set, get) => {
     },
   };
 });
-

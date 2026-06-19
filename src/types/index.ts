@@ -62,6 +62,19 @@ export interface ActivitySignup {
   signedUpAt: string;
 }
 
+export type InvitationStatus = 'pending' | 'accepted' | 'declined';
+
+export interface ActivityInvitation {
+  id: string;
+  activityId: string;
+  memberId: string;
+  invitedBy: string;
+  status: InvitationStatus;
+  message?: string;
+  createdAt: string;
+  respondedAt?: string;
+}
+
 export interface Feedback {
   id: string;
   activityId: string;
@@ -106,4 +119,10 @@ export const TIER_LABELS: Record<SignupTier, string> = {
   core: '核心盘手',
   experience: '体验位',
   substitute: '替补',
+};
+
+export const INVITATION_STATUS_LABELS: Record<InvitationStatus, string> = {
+  pending: '待确认',
+  accepted: '已接受',
+  declined: '已拒绝',
 };
